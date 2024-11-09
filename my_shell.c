@@ -7,6 +7,11 @@ int getcmd(char *buf, int nbuf)
 {
 
   // Prompt for user to input command
+  // clearing buf
+  for (int i = 0; i < 100; i++)
+  {
+    buf[i] = 0;
+  }
   printf(">>> ");
   // fgets(buf, nbuf, stdin);
   read(0, buf, nbuf);
@@ -25,9 +30,9 @@ __attribute__((noreturn)) void run_command(char *buf, int nbuf, int *pcp)
   for (int i = 0; i < 10; i++)
   {
     arguments[i] = malloc(100 * sizeof(char));
-    if (!arguments[i])
+    for (int j = 0; j < 100; j++)
     {
-      // return error message failed to allocate memory
+      arguments[i][j] = '\0';
     }
   }
 
@@ -35,13 +40,15 @@ __attribute__((noreturn)) void run_command(char *buf, int nbuf, int *pcp)
   /* Word start/end */
   int ws = 1;
   int we = 1; //changed from 0
+  int flagPos = 0;
 
   int redirection_left = 0;
   int redirection_right = 0;
   // char *file_name_l = 0;
   // char *file_name_r = 0;
 
-  // int p[2];
+  int p[2];
+
   int pipe_cmd = 0;
 
   int sequence_cmd = 0;
@@ -84,6 +91,10 @@ __attribute__((noreturn)) void run_command(char *buf, int nbuf, int *pcp)
           {
             /* throw error */
           }
+          if (!flagPos)
+          {
+            flagPos = i;
+          }
         }
         else if (buf[i] == ';')
         {
@@ -93,25 +104,33 @@ __attribute__((noreturn)) void run_command(char *buf, int nbuf, int *pcp)
             /* throw error */
           }
         }
-
-        if (ws != 0)
+        else if (buf[i] == '\n')
         {
-          we = ws;
-          ws = 0;
-          numargs += 1;
+          buf[i] = '\0';
+        }
+
+        if (ws != -1)
+        {
+          we = i;
           if (i == 0)
           {
-            numargs -= 1;
+            numargs = -1;
           }
+          else
+          {
+            arguments[numargs][i - ws] = '\0';
+          }
+          numargs += 1;
+          ws = -1;
         }
       }
       //parses single character into respective osition in argument array
       else
       {
-        if (we != 0)
+        if (we != -1)
         {
           ws = i;
-          we = 0;
+          we = -1;
         }
         arguments[numargs][i - ws] = buf[i];
       }
@@ -121,6 +140,7 @@ __attribute__((noreturn)) void run_command(char *buf, int nbuf, int *pcp)
       /* Redirection command. Capture the file names. */
     }
   }
+  arguments[numargs] = 0;
 
   /*
     Sequence command. Continue this command in a new process.
@@ -150,6 +170,13 @@ __attribute__((noreturn)) void run_command(char *buf, int nbuf, int *pcp)
   }
 
   /* Parsing done. Execute the command. */
+  //debugging
+
+  printf("Command: %s\n", arguments[0]);
+  for (int i = 0; i < numargs; i++)
+  {
+    printf("Argument %d: %s\n", i, arguments[i]);
+  }
 
   /*
     If this command is a CD command, write the arguments to the pcp pipe
@@ -157,7 +184,10 @@ __attribute__((noreturn)) void run_command(char *buf, int nbuf, int *pcp)
   */
   if (strcmp(arguments[0], "cd") == 0)
   {
-    // ##### Place your code here.
+    close(pcp[0]);
+    write(pcp[1], buf, nbuf);
+    close(pcp[1]);
+    exit(2);
   }
   else
   {
@@ -167,17 +197,51 @@ __attribute__((noreturn)) void run_command(char *buf, int nbuf, int *pcp)
     */
     if (pipe_cmd)
     {
-      // ##### Place your code here.
+      pipe(p);
+
+      int pID[2];
+      pID[0] = fork();
+      if (pID[0] == 0)
+      {
+        close(1);
+        dup(p[1]);
+        close(p[0]);
+        close(p[1]);
+        exec(arguments[0], arguments);
+        exit(0);
+      }
+      else
+      {
+
+        pID[1] = fork();
+        if (pID[1] == 0)
+        {
+          close(0);
+          dup(p[0]);
+          close(p[1]);
+          close(p[0]);
+          run_command(buf + (flagPos + 1), nbuf - flagPos - 1, pcp);
+          exit(0);
+        }
+
+        close(p[0]);
+        close(p[1]);
+        wait(0);
+      }
     }
     else
     {
       // allows user to exit the shell, otherwise it is indefinitely looping
       if (strcmp(arguments[0], "exit") == 0)
       {
+        // its 'exi' just so it fits the pcpArgs0] properly in main
+        close(pcp[0]);
+        write(pcp[1], "exi", 3);
+        close(pcp[1]);
         exit(0);
       }
-       printf("Command: %s\n", arguments[0]);
       exec(arguments[0], arguments);
+      printf("Exec failed\n");
     }
   }
   exit(0);
@@ -185,28 +249,75 @@ __attribute__((noreturn)) void run_command(char *buf, int nbuf, int *pcp)
 
 int main(void)
 {
-
-  static char buf[100];
-
   int pcp[2];
   pipe(pcp);
-
-  /* Read and run input commands. */
-  // indefinite loop, inside 'run_command' there is a specific exit option
   while (1)
   {
+    static char buf[100];
+
+    /* Read and run input commands. */
+    // indefinite loop, inside 'run_command' there is a specific exit option
     while (getcmd(buf, sizeof(buf)) >= 0)
     {
-      if (fork() == 0)
+      int child_status = fork();
+      printf("%d\n", child_status);
+      if (child_status == 0)
+      {
         run_command(buf, 100, pcp);
+      }
+      else
+      {
 
-      /*
-      Check if run_command found this is
-      a CD command and run it if required.
-    */
-     // int child_status;
-      // ##### Place your code here
+        wait(0);
+
+        char *pcpArgs[2];
+        for (int i = 0; i < 2; i++)
+        {
+          pcpArgs[i] = malloc(100 * sizeof(char));
+          for (int j = 0; j < 100; j++)
+          {
+            pcpArgs[i][j] = '\0';
+          }
+        }
+        int len = 0;
+        len = read(pcp[0], pcpArgs[0], 3);
+        if (!len)
+        {
+        close(pcp[0]);
+        write(pcp[1], "pas", 3);
+        close(pcp[1]);
+        exit(0);
+        }
+        else
+        {
+          if (pcpArgs[0][0] == 'c' && pcpArgs[0][1] == 'd')
+          {
+            //int len = 0;
+            read(pcp[0], pcpArgs[1], sizeof(pcpArgs[1]));
+            close(pcp[0]);
+            close(pcp[1]);
+            if (chdir(pcpArgs[1]) != 0)
+            {
+              printf("directory change failed\n");
+            }
+          }
+          else if (pcpArgs[0][0] == 'e' && pcpArgs[0][1] == 'x' && pcpArgs[0][2] == 'i')
+          {
+            exit(0);
+          }
+          else if (pcpArgs[0][0] == 'p' && pcpArgs[0][1] == 'a' && pcpArgs[0][2] == 's')
+          {
+            // pipe concents 'pas' just mean that the pipe was empty beforehand, so is 'passing' through to the next command input
+          }
+          else
+          {
+            printf("invalid use of pcp\n");
+          }
+          close(pcp[0]);
+          close(pcp[1]);
+        }
+      }
     }
   }
-  exit(0);
 }
+//error with commands, blank spac after? not loping properly? exit? idk
