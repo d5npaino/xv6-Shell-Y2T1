@@ -190,7 +190,7 @@ __attribute__((noreturn)) void run_command(char *buf, int nbuf, int *pcp)
     }
   }
 
-  arguments[numargs] = 0;
+  arguments[numargs] = 0; //just inacse, null terminaning the next array after the last argumnt
   //   printf("Filename: %s\n", filename);
   // for (int i = 0; i < numargs; i++)          <----This was my debugging code
   // {
